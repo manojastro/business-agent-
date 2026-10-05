@@ -18,7 +18,7 @@ class ErrorResponse(BaseModel):
     error: ErrorBody
 
 
-ERRORS = {
+ERRORS: dict[int | str, dict[str, Any]] = {
     401: {"model": ErrorResponse, "description": "Not signed in"},
     403: {"model": ErrorResponse, "description": "Forbidden / CSRF failure"},
     404: {"model": ErrorResponse, "description": "Not found (also returned for other tenants' objects)"},

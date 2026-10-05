@@ -239,7 +239,7 @@ def generate(spec: DatasetSpec) -> Dataset:
                  campaign_id, bid, ingested)
             )
             rows_per_batch[bid] = rows_per_batch.get(bid, 0) + 1
-            for cat, prod, qty, unit in lines:
+            for _cat, prod, qty, unit in lines:
                 item_id += 1
                 ds.items.append((tid, item_id, order_id, prod, qty, unit, "INR"))
 
@@ -250,7 +250,7 @@ def generate(spec: DatasetSpec) -> Dataset:
                      _q(merch * Decimal("0.05")), Decimal("0.00"), campaign_id, bid, ingested + timedelta(minutes=7))
                 )
                 rows_per_batch[bid] += 1
-                for cat, prod, qty, unit in lines:
+                for _cat, prod, qty, unit in lines:
                     item_id += 1
                     ds.items.append((tid, item_id, dup_oid, prod, qty, unit, "INR"))
 
@@ -306,25 +306,25 @@ def reference_aggregates(ds: Dataset, start_utc: datetime, end_utc: datetime, wa
     for _, _, oid, amount, _, refunded_at, *_ in ds.refunds:
         if refunded_at < watermark:
             refunds_by_order[oid] = refunds_by_order.get(oid, Decimal("0")) + amount
-    out = {
-        "merchandise": Decimal("0"), "discount": Decimal("0"), "refunds": Decimal("0"),
-        "completed_orders": 0, "refunded_orders": 0, "canceled_orders": 0,
-        "canceled_merchandise": Decimal("0"), "units": 0,
-    }
+    merch_t = discount_t = refunds_t = canceled_m = Decimal("0")
+    completed = refunded = canceled = units = 0
     for row in ds.orders:
         oid, ordered_at, status, discount = row[1], row[4], row[5], row[9]
         if ordered_at is None or not (start_utc <= ordered_at < end_utc):
             continue
         merch = merch_by_order.get(oid, Decimal("0"))
         if status == "canceled":
-            out["canceled_orders"] += 1
-            out["canceled_merchandise"] += merch
+            canceled += 1
+            canceled_m += merch
             continue
         r = refunds_by_order.get(oid, Decimal("0"))
-        out["merchandise"] += merch
-        out["discount"] += discount
-        out["refunds"] += min(r, max(merch - discount, Decimal("0")))
-        out["completed_orders"] += 1
-        out["refunded_orders"] += 1 if r > 0 else 0
-        out["units"] += units_by_order.get(oid, 0)
-    return out
+        merch_t += merch
+        discount_t += discount
+        refunds_t += min(r, max(merch - discount, Decimal("0")))
+        completed += 1
+        refunded += 1 if r > 0 else 0
+        units += units_by_order.get(oid, 0)
+    return {
+        "merchandise": merch_t, "discount": discount_t, "refunds": refunds_t, "completed_orders": completed,
+        "refunded_orders": refunded, "canceled_orders": canceled, "canceled_merchandise": canceled_m, "units": units,
+    }

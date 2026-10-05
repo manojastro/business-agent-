@@ -21,7 +21,7 @@ DEMO_DATASETS = [
         seed=7,
         start=DEMO_AS_OF - timedelta(days=100),
         as_of=DEMO_AS_OF,
-        orders_per_day=260,
+        orders_per_day=450,
         scenario=Scenario(
             "refund_increase",
             # Refunds spike in North; the Search campaign's spend is cut in the same week

@@ -329,23 +329,31 @@ def dominant_contributor(contrib: dict[str, Any], min_share: Decimal = Decimal("
 def noise_band(
     metric_key: str, daily_rows: list[dict[str, Any]], baseline_start: str, period_days: int
 ) -> dict[str, Any]:
-    """Typical period-over-period variation from the periods before the baseline.
+    """Typical variation of a period-over-period change, estimated from the daily history.
 
-    Groups the daily history into consecutive ``period_days`` periods (ending at the baseline
-    start), computes the metric per period and the percentage change between neighbours.
-    The band is two sample standard deviations of those changes. Fewer than three changes
-    means the band is undefined and the fixed materiality threshold is used.
+    Additive metrics: remove the weekday pattern (subtract each weekday's mean), estimate the
+    residual daily variance (n - 7 degrees of freedom), scale to a period sum assuming
+    independent days, and convert to the standard deviation of the % difference between two
+    periods: sd_change = sqrt(2) * sqrt(period_days * var_resid) / mean_period * 100.
+    The band is 2 * sd_change. This uses ~35 degrees of freedom for six weeks of history,
+    far more stable than the sample deviation of five week-over-week changes.
+    Ratio metrics fall back to the deviation of period-over-period changes.
     """
     from datetime import date as _date
 
     start = _date.fromisoformat(baseline_start)
     periods: dict[int, Aggregates] = {}
+    daily: list[tuple[_date, Decimal]] = []
     for row in daily_rows:
         day = _date.fromisoformat(str(row["day"])[:10])
-        idx = ((start - day).days - 1) // period_days if day < start else -1
-        if idx < 0:
+        if day >= start:
             continue
-        periods[idx] = periods.get(idx, Aggregates()) + Aggregates.from_row(row)
+        a = Aggregates.from_row(row)
+        idx = ((start - day).days - 1) // period_days
+        periods[idx] = periods.get(idx, Aggregates()) + a
+        v = metric_value(metric_key, a)
+        if v is not None:
+            daily.append((day, v))
     ordered = [periods[i] for i in sorted(periods, reverse=True)]  # oldest first
     values = [metric_value(metric_key, a) for a in ordered]
     changes: list[Decimal] = []
@@ -355,21 +363,37 @@ def noise_band(
             if prev is None or cur is None or prev == 0:
                 continue
             changes.append((cur - prev) / abs(prev) * 100)
+        info = {
+            "periods": len(values),
+            "period_values": [fmt(metric_key, v) for v in values],
+            "changes_pct": [str(c.quantize(Decimal("0.01"))) for c in changes],
+        }
+        additive = metric_key in ("net_sales", "order_count")
+        if additive and len(daily) >= 21:
+            by_wd: dict[int, list[Decimal]] = {}
+            for day, v in daily:
+                by_wd.setdefault(day.weekday(), []).append(v)
+            means = {wd: sum(vs, Decimal(0)) / len(vs) for wd, vs in by_wd.items()}
+            resid = [v - means[day.weekday()] for day, v in daily]
+            dof = len(resid) - len(by_wd)
+            if dof > 0:
+                var = sum((r * r for r in resid), Decimal(0)) / dof
+                mean_period = sum((v for _, v in daily), Decimal(0)) / len(daily) * period_days
+                if mean_period > 0:
+                    sd_change = (Decimal(2) * period_days * var).sqrt() / mean_period * 100
+                    band = (2 * sd_change).quantize(Decimal("0.01"))
+                    return {"defined": True, **info, "stdev_pct": str(sd_change.quantize(Decimal("0.01"))),
+                            "band_pct": str(band), "degrees_of_freedom": dof,
+                            "method": "weekday-adjusted daily residual variance scaled to a period; band = 2 sd of the "
+                                      "% change between two independent periods"}
         if len(changes) < 3:
-            return {"defined": False, "periods": len(values), "changes_pct": [str(c.quantize(Decimal("0.01"))) for c in changes]}
-        mean = sum(changes) / len(changes)
-        var = sum((c - mean) ** 2 for c in changes) / (len(changes) - 1)
-        sd = var.sqrt()
-    band = (2 * sd).quantize(Decimal("0.01"))
-    return {
-        "defined": True,
-        "periods": len(values),
-        "period_values": [fmt(metric_key, v) for v in values],
-        "changes_pct": [str(c.quantize(Decimal("0.01"))) for c in changes],
-        "stdev_pct": str(sd.quantize(Decimal("0.01"))),
-        "band_pct": str(band),
-        "method": "two sample standard deviations of period-over-period % change in the preceding periods",
-    }
+            return {"defined": False, **info}
+        mean = sum(changes, Decimal(0)) / len(changes)
+        var_c = sum(((c - mean) ** 2 for c in changes), Decimal(0)) / (len(changes) - 1)
+        sd = var_c.sqrt()
+    return {"defined": True, **info, "stdev_pct": str(sd.quantize(Decimal("0.01"))),
+            "band_pct": str((2 * sd).quantize(Decimal("0.01"))), "degrees_of_freedom": len(changes) - 1,
+            "method": "two sample standard deviations of period-over-period % change"}
 
 
 def is_material(pct_change: str | None, band: dict[str, Any] | None) -> bool:

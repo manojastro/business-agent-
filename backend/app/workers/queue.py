@@ -57,8 +57,9 @@ def enqueue(
             max_attempts=max_attempts,
         )
         .on_conflict_do_nothing(index_elements=["operation_id"])
+        .returning(Job.id)
     )
-    return bool(s.execute(stmt).rowcount)
+    return s.execute(stmt).first() is not None
 
 
 CLAIM_SQL = text(
@@ -99,7 +100,7 @@ def heartbeat(s: Session, job_id: uuid.UUID, token: uuid.UUID, lease_seconds: in
         {"id": job_id, "token": token, "lease": lease_seconds},
     )
     s.commit()
-    return res.rowcount == 1
+    return res.rowcount == 1  # type: ignore[attr-defined]
 
 
 def complete(s: Session, job_id: uuid.UUID, token: uuid.UUID) -> bool:
@@ -109,7 +110,7 @@ def complete(s: Session, job_id: uuid.UUID, token: uuid.UUID) -> bool:
         {"id": job_id, "token": token},
     )
     s.commit()
-    return res.rowcount == 1
+    return res.rowcount == 1  # type: ignore[attr-defined]
 
 
 def fail(s: Session, job: ClaimedJob, error: str, retryable: bool) -> str:
@@ -119,9 +120,10 @@ def fail(s: Session, job: ClaimedJob, error: str, retryable: bool) -> str:
     run_after = datetime.now(UTC) + timedelta(seconds=min(60, 2 ** job.attempts))
     s.execute(
         text("UPDATE jobs SET status = :status, last_error = :err, run_after = :run_after, lease_expires_at = NULL, "
-             "finished_at = CASE WHEN :status = 'failed' THEN now() ELSE NULL END "
+             "finished_at = CASE WHEN :final THEN now() ELSE NULL END "
              "WHERE id = :id AND lease_token = :token"),
-        {"status": status, "err": error[:2000], "run_after": run_after, "id": job.id, "token": job.lease_token},
+        {"status": status, "final": final, "err": error[:2000], "run_after": run_after, "id": job.id,
+         "token": job.lease_token},
     )
     s.commit()
     return status

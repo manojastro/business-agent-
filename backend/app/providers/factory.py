@@ -16,7 +16,7 @@ def get_provider(settings: Settings | None = None, mode: str | None = None) -> M
         raise RuntimeError("Real model mode requires MODEL_NAME, MODEL_ENDPOINT and MODEL_API_KEY")
     from app.providers.openai_compat import ChatCompletionsProvider
 
-    return ChatCompletionsProvider(s)
+    return ChatCompletionsProvider(s)  # type: ignore[return-value]
 
 
 def describe(provider: ModelProvider) -> dict[str, object]:

@@ -250,7 +250,7 @@ def _in_windows(ts: Any) -> ColumnElement[bool]:
     )
 
 
-def _filter_clauses(rel: Any, plan: QueryPlan, params: dict[str, Any]) -> list[ColumnElement[bool]]:
+def _filter_clauses(rel: Any, plan: QueryPlan, params: dict[str, Any]) -> list[Any]:
     from sqlalchemy import bindparam
 
     out = []
@@ -295,7 +295,7 @@ def compile_plan(plan: QueryPlan, ctx: ValidationContext) -> CompiledQuery:
         **_window_bounds(ctx),
     }
     o = ORDER_FACTS
-    shape = plan.analysis
+    shape: str = plan.analysis
     stmt: Select
 
     if plan.analysis in ("totals", "by_dimension") and not (

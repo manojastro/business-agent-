@@ -95,7 +95,8 @@ COMMON_RULES = {
     "cancellation": "Canceled orders are excluded from every metric; they are reported separately as canceled merchandise.",
     "missing_dates": "Orders with NULL ordered_at cannot be placed in a window; they are excluded and surfaced as a data-quality count.",
     "windows": "Half-open [start, end) windows of complete local reporting days in the tenant timezone, converted to UTC.",
-    "currency": "Single reporting currency INR. Currency is stored on every row; rows in other currencies are rejected by the quality check.",
+    "currency": "Single reporting currency INR. Currency is stored on every row; rows in other currencies are "
+    "flagged by the quality check.",
     "rounding": "Exact Decimal arithmetic; values are rounded half-even to 2 decimals for display only.",
 }
 
@@ -118,7 +119,8 @@ BUILTIN_METRICS: dict[str, MetricSpec] = {
                 "Refunds are attributed to the original order's window (order cohort) and counted only if "
                 "refunded_at is before the as-of watermark. Cash-flow refund timing is a different metric and is not used."
             ),
-            "partial_refunds": "Partial refunds count at their amount; total refunds per order are capped at the order's merchandise less discount.",
+            "partial_refunds": "Partial refunds count at their amount; total refunds per order are capped at the "
+            "order's merchandise less discount.",
             "negative_values": "Net sales may be negative for a segment when refunds exceed sales; the value is reported, not clipped.",
             "fanout": "Items are pre-aggregated to order grain and refunds to order grain before joining, so no join fan-out.",
         },
@@ -228,8 +230,8 @@ def validate_definition(defn: dict[str, Any]) -> list[str]:
         unknown = [d for d in dims if d not in DIMENSIONS]
         if unknown:
             errors.append(f"unknown dimensions: {unknown}")
-        if not base.additive and "category" in dims:
-            errors.append("category split is only defined for additive currency metrics")
+        if (not base.additive or base.unit != "currency") and "category" in dims:
+            errors.append("category split is only defined for additive currency metrics (orders span categories)")
     return errors
 
 

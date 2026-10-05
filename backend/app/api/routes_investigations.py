@@ -41,8 +41,10 @@ def _inv_out(i: Investigation, owner: User | None = None) -> dict[str, Any]:
         "status": i.status,
         "metric_key": i.metric_key,
         "metric_version": i.metric_version,
-        "baseline_window": {"start": i.baseline_start.isoformat(), "end": i.baseline_end.isoformat()} if i.baseline_start else None,
-        "current_window": {"start": i.current_start.isoformat(), "end": i.current_end.isoformat()} if i.current_start else None,
+        "baseline_window": {"start": i.baseline_start.isoformat(), "end": i.baseline_end.isoformat()}
+        if i.baseline_start and i.baseline_end else None,
+        "current_window": {"start": i.current_start.isoformat(), "end": i.current_end.isoformat()}
+        if i.current_start and i.current_end else None,
         "as_of": i.as_of_date.isoformat(),
         "timezone": i.timezone,
         "source_watermark": i.source_watermark.isoformat() if i.source_watermark else None,
@@ -210,8 +212,8 @@ def rerun(investigation_id: uuid.UUID, ctx: Ctx = Depends(require("analyst", "ad
     old = svc.get_owned(ctx.db, ctx.tenant_id, investigation_id)
     inv, _ = svc.create(
         ctx.db, tenant=ctx.tenant, user=ctx.user, question=old.question, metric_key=old.metric_key, as_of=old.as_of_date,
-        baseline={"start": old.baseline_start, "end": old.baseline_end} if old.baseline_start else None,
-        current={"start": old.current_start, "end": old.current_end} if old.current_start else None,
+        baseline={"start": old.baseline_start, "end": old.baseline_end} if old.baseline_start and old.baseline_end else None,
+        current={"start": old.current_start, "end": old.current_end} if old.current_start and old.current_end else None,
         idempotency_key=None, model_mode=(old.model_config_ or {}).get("mode"), rerun_of=old.id,
     )
     ctx.audit("investigation_rerun", "investigation", inv.id, {"rerun_of": str(old.id)})

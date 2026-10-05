@@ -120,9 +120,9 @@ def expected_value(a: dict[str, Any], ctx: VerificationContext) -> str | None:
         if totals is None:
             raise LookupError("totals evidence missing")
         tw = _windows(totals)
-        b, c = _segments(src)
+        bseg, cseg = _segments(src)
         contrib = C.additive_contributions(
-            ctx.metric_key, b, c, tw.get("baseline", C.Aggregates()), tw.get("current", C.Aggregates()),
+            ctx.metric_key, bseg, cseg, tw.get("baseline", C.Aggregates()), tw.get("current", C.Aggregates()),
             allocated=shape == "by_dimension_allocated",
         )
         for row in contrib["rows"]:

@@ -10,6 +10,7 @@ import json
 import random
 import time
 from decimal import Decimal
+from typing import Any
 
 import httpx
 from pydantic import ValidationError
@@ -100,9 +101,9 @@ class ChatCompletionsProvider:
         for _ in range(2):  # one schema-repair round
             attempts += 1
             payload = self._post(self._body(request, repair_note))
-            u = payload.get("usage") or {}
-            usage.input_tokens += int(u.get("prompt_tokens", 0))  # type: ignore[union-attr]
-            usage.output_tokens += int(u.get("completion_tokens", 0))  # type: ignore[union-attr]
+            u: dict[str, Any] = payload.get("usage") or {}  # type: ignore[assignment]
+            usage.input_tokens += int(u.get("prompt_tokens", 0))
+            usage.output_tokens += int(u.get("completion_tokens", 0))
             try:
                 content = payload["choices"][0]["message"]["content"]  # type: ignore[index]
                 data = request.response_model.model_validate(json.loads(content))

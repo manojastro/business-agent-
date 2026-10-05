@@ -11,9 +11,10 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 import psycopg
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
@@ -89,9 +90,9 @@ def _route(state: InvestigationState) -> str:
 def build_graph() -> StateGraph:
     g = StateGraph(InvestigationState)
     for name, fn in NODES.items():
-        g.add_node(name, fn)
+        g.add_node(name, fn)  # type: ignore[call-overload]
     g.add_edge(START, "intake")
-    targets = {name: name for name in NODES} | {END: END}
+    targets: dict[Any, str] = {name: name for name in NODES} | {END: END}
     for name in NODES:
         if name in TERMINAL_NODES:
             g.add_edge(name, END)
@@ -112,8 +113,8 @@ def setup_checkpointer() -> None:
         saver.setup()
 
 
-def thread_config(investigation_id: str | uuid.UUID) -> dict[str, Any]:
-    return {"configurable": {"thread_id": str(investigation_id)}, "recursion_limit": 80}
+def thread_config(investigation_id: str | uuid.UUID) -> RunnableConfig:
+    return cast(RunnableConfig, {"configurable": {"thread_id": str(investigation_id)}, "recursion_limit": 80})
 
 
 def advance(investigation_id: str, tenant_id: str, resume: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -123,13 +124,13 @@ def advance(investigation_id: str, tenant_id: str, resume: dict[str, Any] | None
         config = thread_config(investigation_id)
         snap = graph.get_state(config)
         if not snap.values:
-            graph.invoke({"investigation_id": investigation_id, "tenant_id": tenant_id}, config, durability="sync")
+            graph.invoke({"investigation_id": investigation_id, "tenant_id": tenant_id}, config, durability="sync")  # type: ignore[call-overload]
         elif snap.values.get("tenant_id") != tenant_id:
             raise PermissionError("checkpoint belongs to a different tenant")
         elif snap.interrupts and resume is not None:
-            graph.invoke(Command(resume=resume), config, durability="sync")
+            graph.invoke(Command(resume=resume), config, durability="sync")  # type: ignore[call-overload]
         elif snap.next and not snap.interrupts:
-            graph.invoke(None, config, durability="sync")  # resume after interruption of the process
+            graph.invoke(None, config, durability="sync")  # type: ignore[call-overload]  # resume after interruption of the process
         snap = graph.get_state(config)
         return {
             "next": list(snap.next),

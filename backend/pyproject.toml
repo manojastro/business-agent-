@@ -1,7 +1,7 @@
 [project]
 name = "metric-investigator"
 version = "0.1.0"
-description = "Add your description here"
+description = "Metric Investigator - evidence-first business metric investigation agent"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -32,3 +32,29 @@ dev = [
     "pytest-timeout>=2.4.0",
     "ruff>=0.16.10",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+timeout = 300
+addopts = "-q"
+
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+extend-exclude = ["migrations/*/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "ANN", "BLE", "C4", "SIM"]
+ignore = ["ANN401", "S101", "S311", "S608", "B008", "S105", "S106", "SIM102", "SIM113", "SIM117", "UP017"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN", "S", "BLE", "B017", "E501"]
+"app/reports/export.py" = ["E501"]  # inline HTML template
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = false
+check_untyped_defs = false
+files = ["app"]

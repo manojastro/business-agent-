@@ -13,7 +13,6 @@ import time
 from decimal import Decimal
 from typing import Any
 
-from app.agents import schemas as S
 from app.providers.base import ModelRequest, ModelResult, ProviderTimeout, Usage
 
 D = Decimal
@@ -174,7 +173,6 @@ class FixtureProvider:
         h = ctx["headline"]
         ev = h["evidence_id"]
         metric = ctx["metric"]
-        name = metric["name"].lower()
         claims: list[dict[str, Any]] = []
         pct = h["pct_change"]
         if pct is None:
@@ -305,7 +303,7 @@ class FixtureProvider:
                         "detail": "Campaign spend fell while merchandise sales rose; the decline sits in refunds, which "
                                   "advertising does not explain.",
                     })
-        conc = [d for d in f.get("concentrated_dimensions", [])]
+        conc = list(f.get("concentrated_dimensions", []))
         if len(conc) > 1:
             findings.append({
                 "claim_key": None, "issue_type": "confounder", "severity": "warn",
@@ -337,6 +335,12 @@ class FixtureProvider:
         """Scripted 'naive single-pass agent': attributes the change to the most visible coincident
         movement without checking data quality, noise or contradictions."""
         h = ctx["headline"]
+        headline_claim = [{
+            "key": "headline_change", "claim_type": "observed_change", "evidence_ids": [],
+            "wording": f"Net sales moved from {h['baseline']} to {h['current']}.",
+            "numeric": [{"quantity": "metric_baseline", "evidence_id": "context", "value": h["baseline"] or "0"},
+                        {"quantity": "metric_current", "evidence_id": "context", "value": h["current"] or "0"}],
+        }]
         spend = ctx.get("campaign_spend") or {}
         lc = spend.get("largest_change")
         if lc and lc["pct_change"] is not None and abs(_dec(lc["pct_change"])) >= 20:
@@ -344,7 +348,7 @@ class FixtureProvider:
                 "driver": {"label": "undetermined", "confidence": "high",
                            "explanation": f"Advertising change on {lc['campaign_name']}"},
                 "explanation": f"Net sales changed because spend on {lc['campaign_name']} changed by {lc['pct_change']}%.",
-                "claims": [],
+                "claims": headline_claim,
             }
         comps = (ctx.get("components") or {}).get("components") or {}
         if comps:
@@ -354,7 +358,7 @@ class FixtureProvider:
                 best = max(ctx["dimension_tops"], key=lambda t: abs(_dec(t["contribution"])))
                 label = f"dimension:{best['dimension']}={best['segment']}"
             return {"driver": {"label": label, "confidence": "high", "explanation": f"Largest movement was {k}"},
-                    "explanation": f"The change was driven by {k}.", "claims": []}
+                    "explanation": f"The change was driven by {k}.", "claims": headline_claim}
         return {"driver": {"label": "undetermined", "confidence": "low", "explanation": "no components"},
                 "explanation": f"Metric moved {h.get('pct_change')}%.", "claims": []}
 

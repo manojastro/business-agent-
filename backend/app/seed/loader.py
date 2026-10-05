@@ -58,6 +58,9 @@ def load_dataset(ds: Dataset, conninfo: str | None = None) -> dict[str, int]:
                             cp.write_row(r)
                 conn.execute(f"INSERT INTO source.{t} ({COLUMNS[t]}) SELECT {COLUMNS[t]} FROM {stage}")
                 counts[t] = len(rows)
+    with psycopg.connect(conninfo or owner_conninfo(), autocommit=True) as conn:
+        for t in INSERT_ORDER:  # keep planner statistics current after bulk loads
+            conn.execute(f"ANALYZE source.{t}")
     return counts
 
 
