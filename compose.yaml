@@ -1,0 +1,141 @@
+# Metric Investigator - local / single-VM stack.
+#   docker compose up -d db                       # database only (for running the backend with uv)
+#   docker compose --profile app up -d --build    # full stack behind the reverse proxy on :8080
+# Production: also pass -f compose.prod.yaml (removes the published database port, enables TLS via SITE_ADDRESS).
+
+x-backend-env: &backend-env
+  APP_ENV: ${APP_ENV:-development}
+  APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
+  SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+  TRUSTED_PROXIES: ${TRUSTED_PROXIES:-*}
+  RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
+  MAX_REQUEST_BYTES: ${MAX_REQUEST_BYTES:-1048576}
+  DEMO_AS_OF_DATE: ${DEMO_AS_OF_DATE:-2026-09-01}
+  APP_DATABASE_URL: postgresql+psycopg://${APP_DB_USER}:${APP_DB_PASSWORD}@db:5432/metric_app
+  ANALYTICS_DATABASE_URL: postgresql+psycopg://${ANALYTICS_READER_USER}:${ANALYTICS_READER_PASSWORD}@db:5432/metric_analytics
+  ANALYTICS_OWNER_DATABASE_URL: postgresql+psycopg://${ANALYTICS_OWNER_USER}:${ANALYTICS_OWNER_PASSWORD}@db:5432/metric_analytics
+  MODEL_MODE: ${MODEL_MODE:-fixture}
+  MODEL_PROVIDER: ${MODEL_PROVIDER:-azure_openai}
+  MODEL_NAME: ${MODEL_NAME:-}
+  MODEL_ENDPOINT: ${MODEL_ENDPOINT:-}
+  MODEL_API_KEY: ${MODEL_API_KEY:-}
+  MODEL_API_VERSION: ${MODEL_API_VERSION:-2024-10-21}
+  MODEL_TIMEOUT_SECONDS: ${MODEL_TIMEOUT_SECONDS:-60}
+  MODEL_MAX_RETRIES: ${MODEL_MAX_RETRIES:-2}
+  MODEL_INPUT_COST_PER_1K: ${MODEL_INPUT_COST_PER_1K:-0}
+  MODEL_OUTPUT_COST_PER_1K: ${MODEL_OUTPUT_COST_PER_1K:-0}
+  MAX_RUN_COST: ${MAX_RUN_COST:-0.50}
+  MAX_SOURCE_QUERIES: ${MAX_SOURCE_QUERIES:-12}
+  MAX_HYPOTHESES: ${MAX_HYPOTHESES:-8}
+  SOURCE_STATEMENT_TIMEOUT_MS: ${SOURCE_STATEMENT_TIMEOUT_MS:-5000}
+  SOURCE_MAX_ROWS: ${SOURCE_MAX_ROWS:-500}
+  SOURCE_MAX_RESULT_BYTES: ${SOURCE_MAX_RESULT_BYTES:-262144}
+  WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+  WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-30}
+  WORKER_HEARTBEAT_SECONDS: ${WORKER_HEARTBEAT_SECONDS:-10}
+  DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      APP_DB_USER: ${APP_DB_USER}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      ANALYTICS_OWNER_USER: ${ANALYTICS_OWNER_USER}
+      ANALYTICS_OWNER_PASSWORD: ${ANALYTICS_OWNER_PASSWORD}
+      ANALYTICS_READER_USER: ${ANALYTICS_READER_USER}
+      ANALYTICS_READER_PASSWORD: ${ANALYTICS_READER_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:${DB_PORT:-55432}:5432"   # loopback only; removed entirely by compose.prod.yaml
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *logging
+
+  migrate:
+    profiles: ["app"]
+    build: ./backend
+    environment: *backend-env
+    command: ["python", "-m", "app.cli", "migrate"]
+    depends_on:
+      db: { condition: service_healthy }
+    restart: "no"
+    logging: *logging
+
+  api:
+    profiles: ["app"]
+    build: ./backend
+    environment: *backend-env
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=3).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    logging: *logging
+
+  worker:
+    profiles: ["app"]
+    build: ./backend
+    environment: *backend-env
+    command: ["python", "-m", "app.workers.main"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.workers.healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging: *logging
+
+  web:
+    profiles: ["app"]
+    build: ./frontend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *logging
+
+  proxy:
+    profiles: ["app"]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:8080}
+    ports:
+      - "${PROXY_HTTP_PORT:-8080}:8080"
+    volumes:
+      - ./infra/proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      api: { condition: service_healthy }
+      web: { condition: service_started }
+    logging: *logging
+
+volumes:
+  pgdata:
+  caddy_data:
