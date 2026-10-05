@@ -1,0 +1,163 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      real_model_eval:
+        description: "Run the credentialed real-model evaluation (uses MODEL_* secrets, capped spend)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: ci-bootstrap-only
+  APP_DB_USER: mi_app
+  APP_DB_PASSWORD: ci-app-only
+  ANALYTICS_OWNER_USER: mi_analytics_owner
+  ANALYTICS_OWNER_PASSWORD: ci-owner-only
+  ANALYTICS_READER_USER: mi_analytics_reader
+  ANALYTICS_READER_PASSWORD: ci-reader-only
+  APP_DATABASE_URL: postgresql+psycopg://mi_app:ci-app-only@127.0.0.1:5432/metric_app
+  ANALYTICS_DATABASE_URL: postgresql+psycopg://mi_analytics_reader:ci-reader-only@127.0.0.1:5432/metric_analytics
+  ANALYTICS_OWNER_DATABASE_URL: postgresql+psycopg://mi_analytics_owner:ci-owner-only@127.0.0.1:5432/metric_analytics
+  SESSION_SECRET: ci-session-secret-not-used-anywhere-else
+  MODEL_MODE: fixture
+  APP_ENV: test
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      db:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-bootstrap-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.20"
+      - name: Install dependencies (locked)
+        run: uv sync --frozen
+      - name: Lint
+        run: uv run ruff check app tests
+      - name: Type check
+        run: uv run mypy
+      - name: Create roles and databases (same script as docker-entrypoint)
+        working-directory: .
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+          export PGHOST=127.0.0.1 PGPASSWORD=ci-bootstrap-only
+          sed 's/--username "\$POSTGRES_USER"/--username "$POSTGRES_USER" -h 127.0.0.1/' infra/postgres/init/01-roles.sh > /tmp/roles.sh
+          bash /tmp/roles.sh
+      - name: Migrate
+        run: uv run python -m app.cli migrate
+      - name: Seed demo and development evaluation fixtures
+        env:
+          DEMO_USER_PASSWORD: ci-demo-password-123
+        run: |
+          uv run python -m app.cli seed-demo
+          uv run python -m app.cli seed-evals --split development
+      - name: Unit and integration tests
+        run: uv run pytest -q -p no:cacheprovider
+      - name: Short fixture-mode end-to-end flow (API + worker + smoke script)
+        env:
+          DEMO_USER_PASSWORD: ci-demo-password-123
+          BASE_URL: http://127.0.0.1:8000
+          SMOKE_PASSWORD: ci-demo-password-123
+        run: |
+          uv run uvicorn app.main:app --port 8000 > /tmp/api.log 2>&1 &
+          uv run python -m app.workers.main > /tmp/worker.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8000/api/v1/health/ready && break; sleep 1; done
+          python3 ../scripts/smoke.py
+      - name: Fixture evaluation (development split)
+        run: uv run python -m app.cli run-evals --suite synthetic-development --report ../eval-dev.md > /dev/null
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-reports
+          path: |
+            eval-dev.md
+            /tmp/api.log
+            /tmp/worker.log
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Type check
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+
+  real-model-eval:
+    if: github.event_name == 'workflow_dispatch' && inputs.real_model_eval
+    needs: backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: real-model-eval
+    services:
+      db:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-bootstrap-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      MODEL_MODE: real
+      MODEL_PROVIDER: ${{ vars.MODEL_PROVIDER }}
+      MODEL_NAME: ${{ vars.MODEL_NAME }}
+      MODEL_ENDPOINT: ${{ secrets.MODEL_ENDPOINT }}
+      MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
+      MODEL_INPUT_COST_PER_1K: ${{ vars.MODEL_INPUT_COST_PER_1K }}
+      MODEL_OUTPUT_COST_PER_1K: ${{ vars.MODEL_OUTPUT_COST_PER_1K }}
+      MAX_RUN_COST: "0.20"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.20"
+      - run: uv sync --frozen
+      - name: Create roles and databases
+        working-directory: .
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+          export PGHOST=127.0.0.1 PGPASSWORD=ci-bootstrap-only
+          sed 's/--username "\$POSTGRES_USER"/--username "$POSTGRES_USER" -h 127.0.0.1/' infra/postgres/init/01-roles.sh > /tmp/roles.sh
+          bash /tmp/roles.sh
+      - run: uv run python -m app.cli migrate && uv run python -m app.cli seed-evals --split heldout
+      - name: Held-out evaluation with the real model (10 scenarios, capped per-run cost)
+        run: uv run python -m app.cli run-evals --suite synthetic-heldout --limit 10 --model-mode real --report ../eval-heldout-real.md > /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: real-model-eval
+          path: eval-heldout-real.md

@@ -1,0 +1,29 @@
+# Production overrides for a single Ubuntu VM:
+#   docker compose -f compose.yaml -f compose.prod.yaml --profile app up -d --build
+# - database port is not published at all (reachable only on the internal network)
+# - proxy listens on 80/443 and obtains TLS for SITE_ADDRESS (your domain)
+services:
+  db:
+    ports: !reset []
+  api:
+    environment:
+      APP_ENV: production
+      TRUSTED_PROXIES: "*"
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 768M }
+  worker:
+    environment:
+      APP_ENV: production
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 768M }
+  web:
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 64M }
+  proxy:
+    ports: !override
+      - "80:80"
+      - "443:443"
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

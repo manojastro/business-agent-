@@ -1,0 +1,31 @@
+# Reverse proxy. SITE_ADDRESS=":8080" for local HTTP; set it to your domain (e.g. metrics.example.com)
+# to have Caddy obtain and renew a TLS certificate automatically (ports 80/443 must reach this host).
+{
+	admin off
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+{$SITE_ADDRESS::8080} {
+	encode gzip
+	request_body {
+		max_size 1MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	log {
+		output stdout
+		format json
+	}
+	handle /api/* {
+		reverse_proxy api:8000 {
+			flush_interval -1
+		}
+	}
+	handle {
+		reverse_proxy web:8080
+	}
+}

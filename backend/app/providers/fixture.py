@@ -423,12 +423,12 @@ def derive_findings(ctx: dict[str, Any]) -> dict[str, Any]:  # noqa: C901 - one 
     discount_share = shares.get("discount", D("0"))
     merch_share = shares.get("merchandise", D("0"))
     statuses["refunds_component"] = (
-        ("supported", f"Refunds account for {refunds_share:.0f}% of the change.") if refunds_share >= 50
-        else ("refuted", f"Refunds account for only {refunds_share:.0f}% of the change.")
+        ("supported", f"Refunds account for {refunds_share:.1f}% of the change.") if refunds_share >= 50
+        else ("refuted", f"Refunds account for only {refunds_share:.1f}% of the change.")
     )
     statuses["discount_component"] = (
-        ("supported", f"Discounts account for {discount_share:.0f}% of the change.") if discount_share >= 50
-        else ("refuted", f"Discounts account for only {discount_share:.0f}% of the change.")
+        ("supported", f"Discounts account for {discount_share:.1f}% of the change.") if discount_share >= 50
+        else ("refuted", f"Discounts account for only {discount_share:.1f}% of the change.")
     )
     canceled_change = _dec(comps.get("canceled_merchandise_change"))
     merch_delta = _dec(c.get("merchandise")) if c else D("0")
@@ -442,8 +442,8 @@ def derive_findings(ctx: dict[str, Any]) -> dict[str, Any]:  # noqa: C901 - one 
         price_share = _dec(pv["price_effect"]) / merch_delta * 100
         price_driven = price_share >= 60
         statuses["price_vs_volume"] = (
-            ("supported", f"Price effect is {price_share:.0f}% of the merchandise change.") if price_driven
-            else ("refuted", f"Price effect is only {price_share:.0f}% of the merchandise change.")
+            ("supported", f"Price effect is {price_share:.1f}% of the merchandise change.") if price_driven
+            else ("refuted", f"Price effect is only {price_share:.1f}% of the merchandise change.")
         )
 
     # ---- dimension concentration (one dimension at a time) ----

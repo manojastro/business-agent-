@@ -13,3 +13,4 @@ backups/
 *.log
 .DS_Store
 artifacts/
+.claude/
