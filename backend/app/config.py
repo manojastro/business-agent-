@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     worker_heartbeat_seconds: int = Field(default=10, ge=1)
 
     demo_user_password: str = ""
+    fixture_delay_seconds: float = Field(default=0, ge=0, le=30)  # demo knob: slows the fixture model
     otel_exporter_otlp_endpoint: str = ""
 
     @field_validator("session_secret")

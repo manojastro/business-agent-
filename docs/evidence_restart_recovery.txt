@@ -1,0 +1,7 @@
+[10:41:41] investigation d3f39ff7-50f3-4eb9-9a80-38c36e588de1 queued
+[10:41:41] worker #1 started (pid 4176)
+[10:41:57] worker #1 KILLED mid-run: status=running, source queries=6, query runs=6, last event=evidence
+[10:41:57] job still 'running' with lease owned by PhoenixAura:29680; waiting for the lease to expire
+[10:41:58] worker #2 started (pid 45540)
+[10:42:24] worker #2 finished: status=awaiting_review, source queries=10, query runs=10, job=done after 2 attempts (last owner PhoenixAura:43788)
+[10:42:24] RESULT: resumed from checkpoint under the same investigation id; completed queries were reused, none duplicated

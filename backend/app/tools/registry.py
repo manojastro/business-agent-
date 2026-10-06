@@ -20,7 +20,7 @@ from sqlalchemy.exc import OperationalError
 
 from app.agents.runtime import emit
 from app.db.analytics import SourceAccessError, run_source_query
-from app.db.models import EvidenceItem, Hypothesis, Investigation, MetricDefinition, QueryPlanRecord
+from app.db.models import EvidenceItem, Hypothesis, Investigation, MetricDefinition, QueryPlanRecord, QueryRun
 from app.db.session import session_scope
 from app.evidence import ledger
 from app.evidence.verification import spend_changes
@@ -123,7 +123,14 @@ def validation_context(state: dict[str, Any]) -> ValidationContext:
     )
 
 
-def _charge_query(inv: Investigation) -> None:
+def _charge_query(inv: Investigation, plan_hash: str | None = None) -> None:
+    """Charge one source query. A retry of an interrupted operation (same operation id) is not charged twice."""
+    if plan_hash is not None:
+        from sqlalchemy.orm import object_session
+
+        s = object_session(inv)
+        if s is not None and s.scalar(select(QueryRun.id).where(QueryRun.operation_id == ledger.operation_id(inv.id, plan_hash))):
+            return
     if inv.queries_used >= inv.max_source_queries:
         raise QueryBudgetExhausted()
     inv.queries_used += 1
@@ -178,7 +185,7 @@ def get_source_freshness(state: dict[str, Any], inp: FreshnessIn) -> dict[str, A
         assert inv is not None
         existing = ledger.find_completed_run(s, inv, plan_hash)
         if existing is None:
-            _charge_query(inv)
+            _charge_query(inv, plan_hash)
             compiled = CompiledQuery(statement=text(FRESHNESS_SQL), params=params, sql=FRESHNESS_SQL,  # type: ignore[arg-type]
                                      plan_hash=plan_hash, shape="freshness")
             rec = QueryPlanRecord(investigation_id=inv.id, tenant_id=inv.tenant_id, hypothesis_key=None,
@@ -279,7 +286,7 @@ def execute_approved_plan(state: dict[str, Any], inp: ExecuteIn) -> dict[str, An
         if existing is not None:
             return {"evidence_id": str(existing.id), "reused": True, "row_count": existing.row_count,
                     "shape": existing.result.get("shape"), "rows": existing.result["rows"]}
-        _charge_query(inv)
+        _charge_query(inv, compiled.plan_hash)
         run = ledger.start_run(s, inv, rec, compiled)
         s.commit()
         last_exc: Exception | None = None

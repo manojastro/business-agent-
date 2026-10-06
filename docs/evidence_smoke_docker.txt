@@ -1,0 +1,8 @@
+[smoke] health
+[smoke] login analyst
+[smoke] source freshness
+[smoke] create investigation
+[smoke] evidence access
+[smoke] reviewer approval
+[smoke] export
+[smoke] OK - investigation 629a6b5e-858b-49d0-85b1-1d42048300b1

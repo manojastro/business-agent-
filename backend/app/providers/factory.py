@@ -11,7 +11,7 @@ def get_provider(settings: Settings | None = None, mode: str | None = None) -> M
     s = settings or get_settings()
     mode = mode or s.model_mode
     if mode == "fixture":
-        return FixtureProvider()
+        return FixtureProvider(delay_s=s.fixture_delay_seconds)
     if not (s.model_name and s.model_endpoint and s.model_api_key):
         raise RuntimeError("Real model mode requires MODEL_NAME, MODEL_ENDPOINT and MODEL_API_KEY")
     from app.providers.openai_compat import ChatCompletionsProvider
